@@ -210,3 +210,13 @@ contract ContractTest is DSTest {
         );
     }
 }
+
+/*
+encoder: https://abi.hashex.org/
+decoder: https://lab.miguelmota.com/ethereum-input-data-decoder/example/
+
+trias-grow-v3: 
+NonfungiblePositionManager: 0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
+PancakeV3Pool: 0x1DA3D00A2268B214968BF5f3AFa866fc2dEBd20f
+
+*/
